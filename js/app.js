@@ -1,5 +1,11 @@
 /* global AFRAME, HOUSE, ENTITIES */
 
+// Το A-Frame animation component δέχεται μόνο ονομαστικά (Penner) easings,
+// όχι custom cubic-bezier() strings· easeOutCubic/easeInOutCubic είναι τα πιο
+// κοντινά σε "πρωτότυπο", αντίστοιχα με τις καμπύλες του css/style.css.
+var EASE_OUT = 'easeOutCubic';
+var EASE_IN_OUT = 'easeInOutCubic';
+
 // ---------------------------------------------------------------------------
 // Custom A-Frame component: μία οντότητα "έξυπνου σπιτιού" (φως, συσκευή,
 // πόρτα, παράθυρο, αισθητήρας). Χειρίζεται το κλικ, αλλάζει οπτικά την
@@ -32,12 +38,18 @@ AFRAME.registerComponent('interactive-entity', {
 
   onEnter: function () {
     if (this.data.type === 'door') { return; }
-    this.el.setAttribute('scale', '1.15 1.15 1.15');
+    this.hovering = true;
+    this.el.setAttribute('animation__hover', {
+      property: 'scale', to: '1.08 1.08 1.08', dur: 140, easing: EASE_OUT
+    });
   },
 
   onLeave: function () {
     if (this.data.type === 'door') { return; }
-    this.el.setAttribute('scale', '1 1 1');
+    this.hovering = false;
+    this.el.setAttribute('animation__hover', {
+      property: 'scale', to: '1 1 1', dur: 140, easing: EASE_OUT
+    });
   },
 
   onClick: function () {
@@ -50,8 +62,21 @@ AFRAME.registerComponent('interactive-entity', {
       const base = parseFloat(this.data.value) || 0;
       this.currentValue = (base + (Math.random() * 2 - 1)).toFixed(1);
     }
+    this.pressPulse();
     this.applyVisualState();
     this.broadcastInfo();
+  },
+
+  // Σύντομος "press" παλμός (πάτημα-χαλάρωση) στο κλικ, για απτική ανάδραση —
+  // ίδιο κανάλι (scale) με το hover ώστε να μη συγκρούονται τα δύο animation.
+  pressPulse: function () {
+    if (this.data.type === 'door') { return; }
+    const el = this.el;
+    const restScale = this.hovering ? '1.08 1.08 1.08' : '1 1 1';
+    el.setAttribute('animation__hover', { property: 'scale', to: '0.92 0.92 0.92', dur: 90, easing: EASE_OUT });
+    setTimeout(function () {
+      el.setAttribute('animation__hover', { property: 'scale', to: restScale, dur: 150, easing: EASE_OUT });
+    }, 90);
   },
 
   applyVisualState: function () {
@@ -62,17 +87,27 @@ AFRAME.registerComponent('interactive-entity', {
       const on = this.state === 'on';
       el.setAttribute('material', {
         color: on ? '#ffd57a' : '#555555',
-        emissive: on ? '#ffb84d' : '#000000',
-        emissiveIntensity: on ? 0.9 : 0
+        emissive: on ? '#ffb84d' : '#000000'
+      });
+      // Το emissiveIntensity ανιμάρεται ξεχωριστά (βλ. animation__glow) ώστε
+      // το φως να φαίνεται να "ανάβει" σταδιακά αντί να αλλάζει απότομα.
+      el.setAttribute('animation__glow', {
+        property: 'material.emissiveIntensity',
+        to: on ? 0.9 : 0,
+        dur: on ? 180 : 120,
+        easing: EASE_OUT
       });
       let light = el.querySelector('a-light');
       if (on && !light) {
         light = document.createElement('a-light');
         light.setAttribute('type', 'point');
-        light.setAttribute('intensity', '0.6');
+        light.setAttribute('intensity', '0');
         light.setAttribute('distance', '6');
         light.setAttribute('color', '#ffd28a');
         el.appendChild(light);
+        light.setAttribute('animation', {
+          property: 'light.intensity', to: 0.6, dur: 180, easing: EASE_OUT
+        });
       } else if (!on && light) {
         light.parentNode.removeChild(light);
       }
@@ -80,24 +115,31 @@ AFRAME.registerComponent('interactive-entity', {
       const on = this.state === 'on';
       el.setAttribute('material', {
         color: on ? '#3ea1ff' : '#111111',
-        emissive: on ? '#3ea1ff' : '#000000',
-        emissiveIntensity: on ? 0.6 : 0
+        emissive: on ? '#3ea1ff' : '#000000'
+      });
+      el.setAttribute('animation__glow', {
+        property: 'material.emissiveIntensity',
+        to: on ? 0.6 : 0,
+        dur: on ? 180 : 120,
+        easing: EASE_OUT
       });
     } else if (t === 'door') {
       const open = this.state === 'open';
-      el.setAttribute('scale', open ? '0.12 1 1' : '1 1 1');
       el.setAttribute('material', {
         color: open ? '#a5754a' : '#6b4a2c',
-        opacity: open ? 0.55 : 1,
         transparent: true
+      });
+      el.setAttribute('animation__scale', {
+        property: 'scale', to: open ? '0.12 1 1' : '1 1 1', dur: 220, easing: EASE_IN_OUT
+      });
+      el.setAttribute('animation__opacity', {
+        property: 'material.opacity', to: open ? 0.55 : 1, dur: 220, easing: EASE_IN_OUT
       });
     } else if (t === 'window') {
       const open = this.state === 'open';
-      el.setAttribute('material', {
-        color: open ? '#bfe6d8' : '#9fd0e8',
-        opacity: open ? 0.25 : 0.7,
-        transparent: true,
-        side: 'double'
+      el.setAttribute('material', { color: open ? '#bfe6d8' : '#9fd0e8', transparent: true, side: 'double' });
+      el.setAttribute('animation__opacity', {
+        property: 'material.opacity', to: open ? 0.25 : 0.7, dur: 220, easing: EASE_IN_OUT
       });
     } else if (t === 'sensor') {
       el.setAttribute('material', { color: '#dcdcdc' });
@@ -181,14 +223,16 @@ function wireUI(scene) {
     const d = evt.detail;
     panelTitle.textContent = d.label;
 
+    const isActive = d.state === 'on' || d.state === 'open';
     const stateLine = (d.type === 'sensor')
       ? 'Τιμή: ' + d.value + ' ' + d.unit
       : 'Κατάσταση: ' + (STATE_LABELS[d.state] || d.state);
+    const stateColor = d.type === 'sensor' ? '#26291f' : (isActive ? '#3f6b4a' : '#8a8a8a');
 
     panelBody.innerHTML =
       '<span class="tag">' + (TYPE_LABELS[d.type] || d.type) + '</span>' +
       '<p>' + d.desc + '</p>' +
-      '<p class="state-line">' + stateLine + '</p>';
+      '<p class="state-line" style="color:' + stateColor + '">' + stateLine + '</p>';
 
     panel.classList.add('visible');
   });
